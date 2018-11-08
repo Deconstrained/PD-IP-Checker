@@ -11,7 +11,9 @@ if [ -f "webhooks_result.txt" ]; then
   mv webhooks_result.txt webhooks_result.txt.old
 fi
 
-dig +short webhooks.pagerduty.com | sort > webhooks_result.txt
+for ip in $(curl https://app.pagerduty.com/webhook_ips |sed 's/","/ /g;s/\["//g;s/"\]//g'); do
+    echo $ip;
+done | sort > webhooks_result.txt
 
 if [ -f "webhooks_result.txt.old" ]; then
   DIFF=$(diff -q 'webhooks_result.txt.old' 'webhooks_result.txt' > /dev/null)
@@ -21,7 +23,7 @@ if [ -f "webhooks_result.txt.old" ]; then
     N_NEW=$(echo $NEW | awk '{print NF}')
     N_OLD=$(echo $OLD | awk '{print NF}')
     
-    curl -X POST -H 'Content-Type: application/json' -d '{
+    echo '{
         "routing_key": "'$routing_key'",
         "event_action": "trigger",
         "dedup_key": "pagerduty-webhook-new-ips",
@@ -33,10 +35,18 @@ if [ -f "webhooks_result.txt.old" ]; then
                 "new_ips": "'$NEW'",
                 "old_ips": "'$OLD'"
             }
-        }}' -D pagerduty_response_headers.txt 'https://events.pagerduty.com/v2/enqueue' 1> pagerduty_response.txt 2> /dev/null
+        }}' > pagerduty_alert.json
+    curl -X POST \
+        -H 'Content-Type: application/json' \
+        -d @pagerduty_alert.json \
+        -D pagerduty_response_headers.txt \
+        'https://events.pagerduty.com/v2/enqueue' 1> pagerduty_response.txt 2> /dev/null
     accepted=$(grep -o "202 Accepted" pagerduty_response_headers.txt)
     if [[ -z $accepted ]]; then
-      echo "ERROR submitting ACL change alert to PagerDuty; response "`cat response_headers.txt`"\n\n"`cat pagerduty_response.txt` 
+      echo "ERROR submitting ACL change alert to PagerDuty; response "
+      cat pagerduty_response_headers.txt
+      echo
+      cat pagerduty_response.txt
       mv webhooks_result.txt.old webhooks_result.txt
     else
       rm -f pagerduty_response_headers.txt pagerduty_response.txt
